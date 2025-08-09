@@ -6,3 +6,10 @@ export function generateUserAccessToken(payload:any,expiresIn="1d"){
   })
   return token;
 }
+
+export function generateInstanceAccessToken(payload:any,expiresIn="1d"){
+  const token = jwt.sign(payload,process.env.`USER_ACCESS_TOKEN_SECRET`!,{
+    expiresIn
+  })
+  return token;
+}

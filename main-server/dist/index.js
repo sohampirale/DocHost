@@ -18,8 +18,11 @@ const io = new Server(server, {
     }
 });
 import cors from "cors";
+import cookie from "cookie";
 //routers
 import userRouter from "./routes/user.routes.js";
+import { verifyUserAccessToken } from "./lib/verifyToken.js";
+import ApiError from "./helpers/ApiError.js";
 connectDB().then(() => {
     server.listen(3000, () => {
         console.log('✅ Server listening on http://localhost:3000');
@@ -39,70 +42,86 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../src/public', 'index.html'));
 });
 io.on('connection', (socket) => {
-    const { role, username } = socket.handshake.query;
-    if (role === "backend") {
-        console.log("A backend got connected adding it to room1");
-        socket.join("room1");
-        // socket.on("backend",(msg)=>{
-        //   console.log('msg received from backend device : ',msg)
-        // })
-        // socket.on("start-command",(response:string)=>{
-        //   console.log('response of start command from backend is : ',response);
-        // })
-        // socket.on('exec-cmd',(response)=>{
-        //   console.log('response after execurting cmd : ',response);
-        //   socket.to("room1").emit("client",response)
-        // })
-        socket.on('client', (response) => {
-            console.log('response after execurting cmd : ', response);
-            socket.to("room1").emit("client", response);
-        });
+    try {
+        const cookieHeader = socket.handshake.headers.cookie;
+        const cookies = cookie.parse(cookieHeader);
+        const accessToken = cookies.accessToken;
+        const payload = verifyUserAccessToken(accessToken);
+        console.log('payload : ', payload);
     }
-    else if (role === "client") {
-        console.log("A client got connected adding to room1 username : ", username);
-        socket.join("room1");
-        // socket.on('client',(msg)=>{
-        //   console.log("msg receievd from client : ",msg)
-        //   console.log('sending it to backend');
-        //   socket.to("room1").emit("backend",msg)
-        // })
-        socket.on("start-container", (command) => {
-            console.log('start command receievd from client is : ', command);
-            console.log('passing it to the backend');
-            socket.to("room1").emit("start-container", command);
-        });
-        socket.on('resume-container', (name) => {
-            console.log('---------Resume container request received at main server-----');
-            console.log('name of the container : ', name);
-            socket.to('room1').emit('resume-container', name);
-        });
-        // socket.on("start-terminal",()=>{
-        //   console.log('----------start terminal request receievd from client---------')
-        //   console.log('passing it to the backend');
-        //   const data={
-        //     username
-        //   }
-        //   socket.to("room1").emit("start-terminal",JSON.stringify(data))
-        // })
-        socket.on("exec-cmd", (cmd) => {
-            console.log('----------execute command request receievd from client---------');
-            console.log('passing it to the backend');
-            socket.to("room1").emit("exec-cmd", cmd);
-        });
-    }
-    else {
-        console.log('invalid role : ', role);
+    catch (error) {
+        console.log('error validating the accessToken : ', error);
+        console.log('disconnecting the websocket');
+        socket.disconnect(true);
     }
     socket.on('disconnect', () => {
-        if (role === "backend") {
-            console.log("backend disconnected");
-        }
-        else if (role === "client") {
-            console.log("client disconnected");
-        }
-        else {
-            console.log('invalid role disconnected : ', role);
-        }
+        console.log('socket disconnected');
     });
 });
+/*
+  if(role==="backend"){
+
+    console.log("A backend got connected adding it to room1")
+
+    socket.join("room1")
+    
+    // socket.on("backend",(msg)=>{
+    //   console.log('msg received from backend device : ',msg)
+    // })
+
+    // socket.on("start-command",(response:string)=>{
+    //   console.log('response of start command from backend is : ',response);
+    // })
+
+    // socket.on('exec-cmd',(response)=>{
+    //   console.log('response after execurting cmd : ',response);
+    //   socket.to("room1").emit("client",response)
+    // })
+
+    socket.on('client',(response)=>{
+      console.log('response after execurting cmd : ',response);
+      socket.to("room1").emit("client",response)
+    })
+
+  } else  if(role==="client"){
+
+    console.log("A client got connected adding to room1 username : ",username)
+    socket.join("room1")
+
+    // socket.on('client',(msg)=>{
+    //   console.log("msg receievd from client : ",msg)
+    //   console.log('sending it to backend');
+    //   socket.to("room1").emit("backend",msg)
+    // })
+
+    socket.on("start-container",(command)=>{
+      console.log('start command receievd from client is : ',command)
+      console.log('passing it to the backend');
+      socket.to("room1").emit("start-container",command)
+    })
+
+    socket.on('resume-container',(name)=>{
+      console.log('---------Resume container request received at main server-----');
+      console.log('name of the container : ',name);
+      socket.to('room1').emit('resume-container',name)
+    })
+
+    // socket.on("start-terminal",()=>{
+    //   console.log('----------start terminal request receievd from client---------')
+    //   console.log('passing it to the backend');
+    //   const data={
+    //     username
+    //   }
+    //   socket.to("room1").emit("start-terminal",JSON.stringify(data))
+    // })
+
+    socket.on("exec-cmd",(cmd)=>{
+      console.log('----------execute command request receievd from client---------')
+      console.log('passing it to the backend');
+      socket.to("room1").emit("exec-cmd",cmd)
+    })
+    
+  } else {
+    console.log('invalid role : ',role);
+  }*/ 
 //# sourceMappingURL=index.js.map

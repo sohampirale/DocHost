@@ -12,6 +12,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app)
+
 const io = new Server(server,{
   cors: {
     origin: process.env.FRONTEND_URL, 
@@ -21,9 +22,12 @@ const io = new Server(server,{
 })
 
 import cors from "cors"
+import cookie from "cookie"
 
 //routers
 import userRouter from "./routes/user.routes.js";
+import { verifyUserAccessToken } from "./lib/verifyToken.js";
+import ApiError from "./helpers/ApiError.js";
 
 connectDB().then(()=>{
   server.listen(3000, () => {
@@ -51,9 +55,28 @@ app.get('/', (req, res) => {
 
 io.on('connection', (socket) => {
 
-  
-  const {role,username} =socket.handshake.query;
+  try {
+    const cookieHeader =socket.handshake.headers.cookie;
+    const cookies = cookie.parse(cookieHeader)
+    
+    const accessToken=cookies.accessToken;
+    const payload=verifyUserAccessToken(accessToken);
+    console.log('payload : ',payload);
+    
+  } catch (error) {
+    console.log('error validating the accessToken : ',error);
+    console.log('disconnecting the websocket');
+    socket.disconnect(true)
+  }
 
+
+  socket.on('disconnect', () => {
+    console.log('socket disconnected');
+  });
+
+});
+
+/*
   if(role==="backend"){
 
     console.log("A backend got connected adding it to room1")
@@ -118,15 +141,4 @@ io.on('connection', (socket) => {
     
   } else {
     console.log('invalid role : ',role);
-  }
-
-  socket.on('disconnect', () => {
-    if(role==="backend"){
-      console.log("backend disconnected")
-    } else  if(role==="client"){
-      console.log("client disconnected")
-    } else {
-      console.log('invalid role disconnected : ',role);
-    }
-  });
-});
+  }*/
