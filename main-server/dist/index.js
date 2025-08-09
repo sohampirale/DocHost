@@ -1,16 +1,40 @@
+import dotenv from "dotenv";
+dotenv.config();
 import express from "express";
 import http from "http";
 import { Server } from "socket.io";
 import { fileURLToPath } from 'url';
 import path from 'path';
-import pty from "node-pty";
+import connectDB from "./lib/connectDB.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
-import { exec } from "child_process";
-import { stdout } from "process";
+const io = new Server(server, {
+    cors: {
+        origin: process.env.FRONTEND_URL,
+        methods: ["GET", "POST"],
+        credentials: true
+    }
+});
+import cors from "cors";
+//routers
+import userRouter from "./routes/user.routes.js";
+connectDB().then(() => {
+    server.listen(3000, () => {
+        console.log('✅ Server listening on http://localhost:3000');
+    });
+}).catch((err) => {
+    console.log('Failed to connectDB temrinating process gracefully');
+    process.exit(1);
+});
+const allowedOrigin = "https://friendly-spork-wrvgj6vpp69rcgr99-3000.app.github.dev";
+app.use(cors({
+    origin: allowedOrigin,
+    credentials: true
+}));
+app.use(express.json());
+app.use("/user", userRouter);
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../src/public', 'index.html'));
 });
@@ -81,22 +105,4 @@ io.on('connection', (socket) => {
         }
     });
 });
-server.listen(3000, () => {
-    console.log('✅ Server listening on http://localhost:3000');
-});
-// exec(`docker exec ${containerId} ${command}`, (error, stdout, stderr) => {
-//   if (error) {
-//     console.log('error : ', error);
-//     return;
-//   }
-//   if (stderr) {
-//     console.log('stderror : ', stderr);
-//     return;
-//   }
-//   console.log('output : ', stdout);
-//   const result = {
-//     result: stdout
-//   }
-//   socket.emit("start-command", JSON.stringify(result))
-// });
 //# sourceMappingURL=index.js.map
