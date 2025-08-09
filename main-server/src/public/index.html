@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Socket.IO Chat</title>
+</head>
+<body>
+  <h2>Simple Socket.IO Chat</h2>
+  <input id="msgInput" placeholder="Type message..." autocomplete="off" />
+  <button onclick="helperStartContainer()">Start container</button>
+  <button onclick="helperResumeContainer()">Resume my container</button>
+  <button onclick="helperStartTerminal()">Start Terminal</button>
+
+  <button onclick="sendMessage()">Send</button>
+  <ul id="messages"></ul>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+  <script>
+    const r=Math.random()
+    const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev?role=client&username=user"+r); 
+
+    socket.on('connect', () => {
+      console.log('🟢 Connected:', socket.id);
+    });
+
+    socket.on('disconnect', () => {
+      console.log('🔴 Disconnected');
+    });
+
+    socket.on('client', (msg) => {
+      // alert("resposne received from backend")
+      const li = document.createElement('li');
+      li.textContent = msg;
+      document.getElementById('messages').appendChild(li);
+    });
+
+    function helperStartContainer(){
+      console.log("inside helperStartCommand")
+      socket.emit("start-container","docker run -it --name soham ubuntu bash")
+    }
+
+    function helperStartTerminal(){
+      console.log("inside helperStartTerminal")
+      socket.emit("start-terminal")
+    }
+
+    function sendMessage() {
+      const input = document.getElementById('msgInput');
+      const message = input.value;
+      if (message.trim()) {
+        socket.emit('exec-cmd', message);
+        input.value = '';
+      }
+    }
+
+    function helperResumeContainer(){
+      socket.emit('resume-container',"soham")
+    }
+  </script>
+</body>
+</html>
