@@ -30,6 +30,7 @@ import { verifyInstanceAccessToken, verifyUserAccessToken } from "./helpers/veri
 import ApiError from "./helpers/ApiError.js";
 import instanceRouter from "./routes/instance.routes.js";
 import { roomNameGenerator } from "./helpers/randomRoomNameGenerator.js";
+import { getUserWithId } from "./services/user.services.js";
 
 connectDB().then(() => {
   server.listen(3000, () => {
@@ -146,7 +147,9 @@ io.on('connection', (socket) => {
 
   const role=socket.handshake.query.role;
   if(role=='client'){
-    socket.on("start-container",(data)=>{
+
+    socket.on("start-container",async(data)=>{
+      
       const instanceId=data.insatnceId;
       const instanceSID=instanceIdToSocketId.get(instanceId)
 
@@ -161,6 +164,19 @@ io.on('connection', (socket) => {
         user.socket.leave(user.room)
         user.room=undefined;
       }
+
+      const userDB=await getUserWithId(user.userInfo._id)
+
+      if(!userDB){
+        console.log('user does not exists in the DB');
+        return;
+      }
+
+    
+
+      userDB.instances.push(instanceId);
+
+      await userDB.save()
 
       const instance = activeInstances.get(instanceSID)
 
@@ -179,6 +195,37 @@ io.on('connection', (socket) => {
       })
       console.log('added client : ',user.userInfo.username,' to room : ',roomName);
       console.log('added backend : ',instance.instanceInfo.username,' to room : ',roomName);      
+
+      const userInstances=userDB.instances;
+
+      if(userInstances.includes(instanceId)){
+        console.log('User already has one container in this instance');
+        socket.to(user.userInfo.username).emit("resume-container",{
+          username:user.userInfo.username,
+          roomName
+        })
+        //resume-instance request this is
+        return
+      }
+
+      socket.to(roomName).emit("start-container",{
+        username:user.userInfo.username,
+        roomName
+      })
+    })
+
+    socket.on("resume-container",(data)=>{})
+
+  } else if(role=='backend'){
+
+    socket.on("client-notification",(data:{roomName:string,notification:string})=>{
+      const roomName=data.roomName
+      socket.to(roomName).emit('client-notification',data.notification)
+    })
+
+    socket.on("client-output",(data:{roomName:string,output:string})=>{
+      const roomName=data.roomName;
+      socket.to(roomName).emit("client-output",data.output)
     })
 
   }

@@ -19,13 +19,16 @@ function createFolderAtDirectory(directoryPath: string, folderName: string) {
 
 const usersMap: Map<string, any> = new Map();
 
-let terminal;
 
 function start_container_cmd(username: string) {
   return `docket run -it --name ${username} ubuntu`
 }
 
-const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev", {
+function resume_container_cmd(username:string){
+  return `docker start -ai ${username}`
+}
+
+const socket = io(process.env.MAIN_SERVER_BACKEND_URL, {
   query: {
     role: "backend"
   },
@@ -36,11 +39,6 @@ const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev
 
 socket.on("connect", () => {
   console.log("Connected to Main Server:", socket.id);
-
-  socket.on("backend", (command) => {
-    console.log("msg received from main-server is : ", command);
-
-  })
 
   const shell = "bash"
 
@@ -62,78 +60,124 @@ socket.on("connect", () => {
       env: process.env
     })
 
-    terminal.on("data", (notification: string) => {
-      console.log('data reveieved from terminal : ', data);
+    if(!terminal){
       socket.emit("client-notification", {
-        username: data.username,
         roomName: data.roomName,
-        notification
+        notification:'Failed to start your container'
+      })
+      return;
+    }else {
+      socket.emit("client-notification", {
+        roomName: data.roomName,
+        notification:'Container started successfully'
+      })
+      if(usersMap.has(data.username)){
+        usersMap.delete(data.username)
+      }
+      usersMap.set(data.username,{
+        roomName:data.roomName,
+        terminal
+      })
+    }
+
+    terminal.on("data", (output: string) => {
+      console.log('output reveieved from new terminal  is : ', output);
+      if(!usersMap.has(data.username)){
+        console.log('output receievd from terminla but user not found,returning...');
+        return;
+      }
+
+      const roomName=usersMap.get(data.username).roomName
+
+      socket.emit("client-output",{
+        roomName,
+        output
       })
     })
 
   })
 
-  socket.on('start-terminal', (data) => {
-    // const jsonData=JSON.parse(data)
-    // if(!jsonData.username){
-    //   console.log('username not provided!!');
-    //   socket.emit("")
-    //   return;
-    // }
-    // console.log('start terminal request receievd at the backend  jsonData : ',jsonData);
-
-    // if(folderExistsInDirectory("/workspaces/DocHost",jsonData.username)){
-    //   console.log('folder exists');
-    // } else {
-    //   console.log('New user first time on this instance');
-    //   createFolderAtDirectory('/workspaces/DocHost',jsonData.username)
-    // }
-
-    // terminal = pty.spawn("sudo", ["chroot", "/workspaces/DocHost/user1", "/bin/bash"], {
-    //   name: "xterm-color",
-    //   cols: 80,
-    //   rows: 30,
-    //   env: process.env
-    // })
-
-    // terminal.on("data", (data: string) => {
-    //   console.log('data reveieved from terminal : ', data);
-    //   socket.emit("client", data)
-    // })
-  })
-
-  socket.on('exec-cmd', (cmd: string) => {
-    if (cmd == 'stop') {
-      if (terminal) {
-        terminal.write('\x03'); // Sends SIGINT (Ctrl+C) to stop the running process
-        return;
-      }
+  socket.on('resume-container', (data: { username: string, roomName: string }) => {
+    if(!data.username){
+      console.log('username not receievd to start container,returning...');
+      return
     }
-    console.log('cmd receievd at backend to execute : ', cmd);
-    terminal.write(cmd + '\n')
-  })
 
-  socket.on('resume-container', (name) => {
-    console.log('-------Resuem container request receievd at backend -----');
-    console.log('name of the container : ', name);
-    const shell = "docker";
-    const args = ["start", "-ai", name];
+    const args = resume_container_cmd(data.username).split(" ")
+    console.log('resume container command at backend is : ', args);
 
-    terminal = pty.spawn(shell, args, {
+    const terminal = pty.spawn(args[0], args.slice(1), {
       name: "xterm-color",
       cols: 80,
-      rows: 24,
-      env: process.env,
+      rows: 30,
+      cwd: "/workspaces/DocHost",
+      env: process.env
     })
 
-    terminal.on("data", (data) => {
-      console.log('on data 1' + data);
-      socket.emit("client", data)
-    });
+    if(!terminal){
+      socket.emit("client-notification", {
+        roomName: data.roomName,
+        notification:'Failed to resume your container'
+      })
+      return;
+    }else {
+      socket.emit("client-notification", {
+        roomName: data.roomName,
+        notification:'Container resumed successfully'
+      })
+
+      if(usersMap.has(data.username)){
+        usersMap.get(data.username).terminal.kill()
+        usersMap.delete(data.username)
+        console.log('deleted old terminal instance of the same user');
+      }
+      usersMap.set(data.username,{
+        roomName:data.roomName,
+        terminal
+      })
+    }
+
+    terminal.on("data", (output: string) => {
+      console.log('output reveieved from reseumed terminal is : ', output);
+
+      socket.emit("client-output",{
+        roomName:data.roomName,
+        output
+      })
+    })
+  
+  })
+
+  socket.on("exec-cmd",(data: { username: string, roomName: string ,command:string})=>{
+    const username=data.username
+    const command=data.command
+    if(!username){
+      console.log('username not provided,returning');
+      return 
+    } else if(!usersMap.has(username)){
+      console.log('termianl not found for username : ',username,',returning...');
+      return
+    }
+
+    const terminal=usersMap.get(username).terminal
+    if(terminal){
+      terminal.write(command+'\n')
+    } else {
+      console.log('terminal not found for username : ',username);
+      socket.emit("client-notification","Terminal not found")
+    }
   })
 
   socket.on("disconnect", () => {
     console.log('disconnected from main-server via WS');
-    if (terminal) terminal.kill();
+    
+    for(const[username:string,value:any]=>{
+        if(value.terminal){
+          value.terminal.kill()
+          console.log('killed terminal of ',username)
+        }
+    })
+
+    usersMap.clear()
   });
 });
