@@ -26,9 +26,10 @@ import cookie from "cookie"
 
 //routers
 import userRouter from "./routes/user.routes.js";
-import { verifyUserAccessToken } from "./lib/verifyToken.js";
+import { verifyInstanceAccessToken, verifyUserAccessToken } from "./helpers/verifyToken.js";
 import ApiError from "./helpers/ApiError.js";
 import instanceRouter from "./routes/instance.routes.js";
+import { roomNameGenerator } from "./helpers/randomRoomNameGenerator.js";
 
 connectDB().then(() => {
   server.listen(3000, () => {
@@ -40,11 +41,18 @@ connectDB().then(() => {
 })
 
 const allowedOrigin = "https://friendly-spork-wrvgj6vpp69rcgr99-3000.app.github.dev";
-
 app.use(cors({
   origin: process.env.FRONTEND_URL,
   credentials: true
 }))
+
+const activeUsers: Map<string, any> = new Map();
+const activeInstances: Map<string, any> = new Map();
+const activeRooms: Map<string, any> = new Map();
+
+
+const userIdToSocketId:Map<string,string>=new Map();
+const instanceIdToSocketId:Map<string,string>=new Map();
 
 app.use(express.json());
 
@@ -67,35 +75,160 @@ io.use((socket, next) => {
         console.log('Client needs to signin first');
         return next(new Error("No auth token found"))
       }
-
       const cookies = cookie.parse(cookieHeader)
       const accessToken = cookies.accessToken;
+      if(!accessToken){
+        return next(new Error("accessToken not found"))
+      }
+
       console.log('accessToken : ', accessToken);
-      //verify userAccessToken
-      console.log('client connected');
+      const userInfo = verifyUserAccessToken(accessToken)
+      const _id=userInfo._id;
+      if(userIdToSocketId.has(_id)){
+        const sid=userIdToSocketId.get(_id);
+        if(activeUsers.has(sid)){
+          activeUsers.get(sid).socket.disconnect()
+          activeUsers.delete(sid)
+        }
+        userIdToSocketId.delete(_id)
+      }
+
+      console.log('client conncted');
+      activeUsers.set(socket.id,{
+        socket,
+        room:undefined,
+        userInfo
+      })
+      userIdToSocketId.set(userInfo._id,socket.id)
+      printActiveUsers()
     } else if (role == "backend") {
       const DOCKHOST_API_KEY = socket.handshake.auth.DOCKHOST_API_KEY;
-      console.log('Backend connected API_KEY : ', DOCKHOST_API_KEY);
-      //verify instanceAccessToken
+      console.log('Backend connected : API_KEY : ', DOCKHOST_API_KEY);
+      const instanceInfo = verifyInstanceAccessToken(DOCKHOST_API_KEY)
+      const _id=instanceInfo._id;
+      console.log('_id of instance : ',_id);
+      
+      if(instanceIdToSocketId.has(_id)){
+        const sid=instanceIdToSocketId.get(_id);
+        if(activeInstances.has(sid)){
+          console.log('disconnecting one socket');
+          activeInstances.get(sid).socket.disconnect()
+          activeInstances.delete(sid)
+        }
+        console.log('removed _id form instanceIdToSocketId');
+        
+        instanceIdToSocketId.delete(_id)
+      }
+
+      activeInstances.set(socket.id,{
+        socket,
+        instanceInfo,
+        rooms:[]
+      })
+
+      instanceIdToSocketId.set(instanceInfo._id,socket.id)
+      printActiveInstances()
     } else if (!role) {
       console.log('No role found');
       next(new Error("Invalid query param"))
     }
     next()
   } catch (error) {
-    next(error)
+    if(error instanceof Error){
+      return next(error)
+    }
+    next(new Error("Something went wrong"))
   }
 });
-
 
 io.on('connection', (socket) => {
   console.log('socket connected successfully!');
 
+  const role=socket.handshake.query.role;
+  if(role=='client'){
+    socket.on("start-container",(data)=>{
+      const instanceId=data.insatnceId;
+      const instanceSID=instanceIdToSocketId.get(instanceId)
+
+      if(!instanceSID || !activeInstances.has(instanceSID)){
+        console.log('Requested instance is not online at the moment');
+        return;
+      }      
+
+      const user=activeUsers.get(socket.id)
+      if(user.room){
+        console.log('removed client : ',user.userInfo.username,' from room : ',user.room);
+        user.socket.leave(user.room)
+        user.room=undefined;
+      }
+
+      const instance = activeInstances.get(instanceSID)
+
+      const roomName=roomNameGenerator(instance.instanceInfo.username,user.userInfo.username)
+      console.log('adding ',user.userInfo.username,' to room : ',roomName);
+
+      user.room=roomName;
+      instance.rooms.push(roomName)
+
+      user.socket.join(roomName)
+      instance.socket.join(roomName)
+
+      activeRooms.set(roomName,{
+        clientSID:socket.id,
+        instanceSID:instanceSID
+      })
+      console.log('added client : ',user.userInfo.username,' to room : ',roomName);
+      console.log('added backend : ',instance.instanceInfo.username,' to room : ',roomName);      
+    })
+
+  }
+
   socket.on('disconnect', () => {
     console.log('socket disconnected');
+    const role=socket.handshake.query.role;
+    if(role=='client'){
+      if(activeUsers.has(socket.id)){
+        const userInfo=activeUsers.get(socket.id).userInfo
+        const _id=userInfo._id
+        console.log(userInfo.username,' removed from active users');
+        if(userIdToSocketId.has(_id)){
+          userIdToSocketId.delete(_id)
+        }
+        activeUsers.delete(socket.id)
+      }
+    } else if(role=='backend'){
+      if(activeInstances.has(socket.id)){
+        const instanceInfo=activeInstances.get(socket.id).instanceInfo
+        const _id=instanceInfo._id;
+        console.log(instanceInfo.username,' removed from active instances');
+        if(instanceIdToSocketId.has(_id)){
+          instanceIdToSocketId.delete(_id)
+        }
+        activeUsers.delete(socket.id)
+      }
+    }
   });
 
 });
+
+function printActiveUsers(){
+  console.log('-----------ACTIVE-USERS------------------');
+  console.log(activeUsers);
+  console.log('-----------userIdToSocketId------------------');
+  console.log(userIdToSocketId);
+}
+
+function printActiveInstances(){
+  console.log('-----------ACTIVE-INSTANCES--------------');
+  console.log(activeInstances);
+  console.log('-----------instanceIdToSocketId------------------');
+  console.log(instanceIdToSocketId);
+}
+
+// setInterval(()=>{
+//   console.log('-----------ACTIVE-USERS------------------');
+//   console.log(activeUsers);
+// },5000)
 
 /*
   if(role==="backend"){

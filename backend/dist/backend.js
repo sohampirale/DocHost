@@ -14,7 +14,6 @@ function createFolderAtDirectory(directoryPath, folderName) {
     console.log(`✅ Folder "${folderName}" created at "${directoryPath}"`);
 }
 let terminal;
-// Connect to Main Server
 const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev", {
     query: {
         role: "backend"
@@ -96,6 +95,7 @@ socket.on("connect", () => {
         });
     });
     socket.on("disconnect", () => {
+        console.log('disconnected from main-server via WS');
         if (terminal)
             terminal.kill();
     });

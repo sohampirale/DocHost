@@ -17,9 +17,14 @@ function createFolderAtDirectory(directoryPath: string, folderName: string) {
   console.log(`✅ Folder "${folderName}" created at "${directoryPath}"`);
 }
 
+const usersMap:Map<string,any>=new Map();
+
 let terminal;
 
-// Connect to Main Server
+function start_container_cmd(username:string){
+  return `docket run -it --name ${username} ubuntu`
+}
+
 const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev",{
   query:{
     role:"backend"
@@ -39,11 +44,17 @@ socket.on("connect", () => {
 
   const shell = "bash"
 
-  socket.on('start-container', (command) => {
-    const args = command.split(" ")
-    console.log('start command received at backend is : ', args);
+  socket.on('start-container', (data:{username:string,roomName:string}) => {
 
-    terminal = pty.spawn(args[0], args.slice(1), {
+    if(!data.username){
+      console.log('username not found no starting container retunring...');
+      return;
+    }
+
+    const args = start_container_cmd(data.username).split(" ")
+    console.log('start container command at backend is : ', args);
+
+    const terminal = pty.spawn(args[0], args.slice(1), {
       name: "xterm-color",
       cols: 80,
       rows: 30,
@@ -51,10 +62,15 @@ socket.on("connect", () => {
       env: process.env
     })
 
-    terminal.on("data", (data: string) => {
+    terminal.on("data", (notification: string) => {
       console.log('data reveieved from terminal : ', data);
-      socket.emit("client", data)
+      socket.emit("client-notification", {
+        username:data.username,
+        roomName:data.roomName,
+        notification
+      })
     })
+
   })
 
   socket.on('start-terminal', (data) => {
@@ -117,6 +133,7 @@ socket.on("connect", () => {
   })
 
   socket.on("disconnect", () => {
+    console.log('disconnected from main-server via WS');
     if (terminal) terminal.kill();
   });
 });

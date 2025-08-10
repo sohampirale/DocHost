@@ -21,7 +21,7 @@ import cors from "cors";
 import cookie from "cookie";
 //routers
 import userRouter from "./routes/user.routes.js";
-import { verifyUserAccessToken } from "./lib/verifyToken.js";
+import { verifyInstanceAccessToken, verifyUserAccessToken } from "./helpers/verifyToken.js";
 import ApiError from "./helpers/ApiError.js";
 import instanceRouter from "./routes/instance.routes.js";
 connectDB().then(() => {
@@ -37,6 +37,10 @@ app.use(cors({
     origin: process.env.FRONTEND_URL,
     credentials: true
 }));
+const activeUsers = new Map();
+const activeInstances = new Map();
+const userIdToSocketId = new Map();
+const instanceIdToSocketId = new Map();
 app.use(express.json());
 app.use("/user", userRouter);
 app.use('/instance', instanceRouter);
@@ -55,14 +59,52 @@ io.use((socket, next) => {
             }
             const cookies = cookie.parse(cookieHeader);
             const accessToken = cookies.accessToken;
+            if (!accessToken) {
+                return next(new Error("accessToken not found"));
+            }
             console.log('accessToken : ', accessToken);
-            //verify userAccessToken
-            console.log('client connected');
+            const userInfo = verifyUserAccessToken(accessToken);
+            const _id = userInfo._id;
+            if (userIdToSocketId.has(_id)) {
+                const sid = userIdToSocketId.get(_id);
+                if (activeUsers.has(sid)) {
+                    activeUsers.get(sid).socket.disconnect();
+                    activeUsers.delete(sid);
+                }
+                userIdToSocketId.delete(_id);
+            }
+            console.log('client conncted');
+            activeUsers.set(socket.id, {
+                socket,
+                room: undefined,
+                userInfo
+            });
+            userIdToSocketId.set(userInfo._id, socket.id);
+            printActiveUsers();
         }
         else if (role == "backend") {
             const DOCKHOST_API_KEY = socket.handshake.auth.DOCKHOST_API_KEY;
-            console.log('Backend connected API_KEY : ', DOCKHOST_API_KEY);
-            //verify instanceAccessToken
+            console.log('Backend connected : API_KEY : ', DOCKHOST_API_KEY);
+            const instanceInfo = verifyInstanceAccessToken(DOCKHOST_API_KEY);
+            const _id = instanceInfo._id;
+            console.log('_id of instance : ', _id);
+            if (instanceIdToSocketId.has(_id)) {
+                const sid = instanceIdToSocketId.get(_id);
+                if (activeInstances.has(sid)) {
+                    console.log('disconnecting one socket');
+                    activeInstances.get(sid).socket.disconnect();
+                    activeInstances.delete(sid);
+                }
+                console.log('removed _id form instanceIdToSocketId');
+                instanceIdToSocketId.delete(_id);
+            }
+            activeInstances.set(socket.id, {
+                socket,
+                instanceInfo,
+                rooms: []
+            });
+            instanceIdToSocketId.set(instanceInfo._id, socket.id);
+            printActiveInstances();
         }
         else if (!role) {
             console.log('No role found');
@@ -71,15 +113,68 @@ io.use((socket, next) => {
         next();
     }
     catch (error) {
-        next(error);
+        if (error instanceof Error) {
+            return next(error);
+        }
+        next(new Error("Something went wrong"));
     }
 });
 io.on('connection', (socket) => {
     console.log('socket connected successfully!');
+    const role = socket.handshake.query.role;
+    if (role == 'client') {
+        socket.on("start-container", (data) => {
+            const instanceId = data.insatnceId;
+            const sid = instanceIdToSocketId.get(instanceId);
+            if (!sid) {
+                console.log('Requested instance is not online at the moment');
+                return;
+            }
+        });
+    }
     socket.on('disconnect', () => {
         console.log('socket disconnected');
+        const role = socket.handshake.query.role;
+        if (role == 'client') {
+            if (activeUsers.has(socket.id)) {
+                const userInfo = activeUsers.get(socket.id).userInfo;
+                const _id = userInfo._id;
+                console.log(userInfo.username, ' removed from active users');
+                if (userIdToSocketId.has(_id)) {
+                    userIdToSocketId.delete(_id);
+                }
+                activeUsers.delete(socket.id);
+            }
+        }
+        else if (role == 'backend') {
+            if (activeInstances.has(socket.id)) {
+                const instanceInfo = activeInstances.get(socket.id).instanceInfo;
+                const _id = instanceInfo._id;
+                console.log(instanceInfo.username, ' removed from active instances');
+                if (instanceIdToSocketId.has(_id)) {
+                    instanceIdToSocketId.delete(_id);
+                }
+                activeUsers.delete(socket.id);
+            }
+        }
     });
 });
+function printActiveUsers() {
+    console.log('-----------ACTIVE-USERS------------------');
+    console.log(activeUsers);
+    console.log('-----------userIdToSocketId------------------');
+    console.log(userIdToSocketId);
+}
+function printActiveInstances() {
+    console.log('-----------ACTIVE-INSTANCES--------------');
+    console.log(activeInstances);
+    console.log('-----------instanceIdToSocketId------------------');
+    console.log(instanceIdToSocketId);
+}
+// setInterval(()=>{
+//   console.log('-----------ACTIVE-USERS------------------');
+//   console.log(activeUsers);
+// },5000)
 /*
   if(role==="backend"){
 
