@@ -17,20 +17,20 @@ function createFolderAtDirectory(directoryPath: string, folderName: string) {
   console.log(`✅ Folder "${folderName}" created at "${directoryPath}"`);
 }
 
-const usersMap:Map<string,any>=new Map();
+const usersMap: Map<string, any> = new Map();
 
 let terminal;
 
-function start_container_cmd(username:string){
+function start_container_cmd(username: string) {
   return `docket run -it --name ${username} ubuntu`
 }
 
-const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev",{
-  query:{
-    role:"backend"
+const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev", {
+  query: {
+    role: "backend"
   },
   auth: {
-      DOCKHOST_API_KEY:process.env.DOCKHOST_API_KEY
+    DOCKHOST_API_KEY: process.env.DOCKHOST_API_KEY
   },
 });
 
@@ -44,9 +44,9 @@ socket.on("connect", () => {
 
   const shell = "bash"
 
-  socket.on('start-container', (data:{username:string,roomName:string}) => {
+  socket.on('start-container', (data: { username: string, roomName: string }) => {
 
-    if(!data.username){
+    if (!data.username) {
       console.log('username not found no starting container retunring...');
       return;
     }
@@ -65,8 +65,8 @@ socket.on("connect", () => {
     terminal.on("data", (notification: string) => {
       console.log('data reveieved from terminal : ', data);
       socket.emit("client-notification", {
-        username:data.username,
-        roomName:data.roomName,
+        username: data.username,
+        roomName: data.roomName,
         notification
       })
     })
@@ -103,7 +103,7 @@ socket.on("connect", () => {
   })
 
   socket.on('exec-cmd', (cmd: string) => {
-    if(cmd=='stop'){
+    if (cmd == 'stop') {
       if (terminal) {
         terminal.write('\x03'); // Sends SIGINT (Ctrl+C) to stop the running process
         return;
@@ -113,21 +113,21 @@ socket.on("connect", () => {
     terminal.write(cmd + '\n')
   })
 
-  socket.on('resume-container',(name)=>{
+  socket.on('resume-container', (name) => {
     console.log('-------Resuem container request receievd at backend -----');
-    console.log('name of the container : ',name);
+    console.log('name of the container : ', name);
     const shell = "docker";
-    const args = ["start", "-ai", name]; 
+    const args = ["start", "-ai", name];
 
-    terminal = pty.spawn(shell,args, {
+    terminal = pty.spawn(shell, args, {
       name: "xterm-color",
       cols: 80,
       rows: 24,
       env: process.env,
     })
 
-     terminal.on("data", (data) => {
-      console.log('on data 1'+data);
+    terminal.on("data", (data) => {
+      console.log('on data 1' + data);
       socket.emit("client", data)
     });
   })
