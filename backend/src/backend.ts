@@ -170,14 +170,13 @@ socket.on("connect", () => {
 
   socket.on("disconnect", () => {
     console.log('disconnected from main-server via WS');
-    
-    for(const[username:string,value:any]=>{
+
+    for(const[username,value]  of usersMap){
         if(value.terminal){
           value.terminal.kill()
           console.log('killed terminal of ',username)
         }
-    })
-
+    }
     usersMap.clear()
   });
 });

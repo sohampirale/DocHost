@@ -7,6 +7,7 @@ import { Server } from "socket.io"
 import { fileURLToPath } from 'url';
 import path from 'path';
 import connectDB from "./lib/connectDB.js";
+import mongoose from "mongoose";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -148,9 +149,9 @@ io.on('connection', (socket) => {
   const role=socket.handshake.query.role;
   if(role=='client'){
 
-    socket.on("start-container",async(data)=>{
+    socket.on("start-container",async(data:{instanceId:string})=>{
       
-      const instanceId=data.insatnceId;
+      const instanceId=data.instanceId;
       const instanceSID=instanceIdToSocketId.get(instanceId)
 
       if(!instanceSID || !activeInstances.has(instanceSID)){
@@ -159,12 +160,7 @@ io.on('connection', (socket) => {
       }      
 
       const user=activeUsers.get(socket.id)
-      if(user.room){
-        console.log('removed client : ',user.userInfo.username,' from room : ',user.room);
-        user.socket.leave(user.room)
-        user.room=undefined;
-      }
-
+      
       const userDB=await getUserWithId(user.userInfo._id)
 
       if(!userDB){
@@ -172,19 +168,20 @@ io.on('connection', (socket) => {
         return;
       }
 
-    
-
-      userDB.instances.push(instanceId);
-
-      await userDB.save()
-
       const instance = activeInstances.get(instanceSID)
 
-      const roomName=roomNameGenerator(instance.instanceInfo.username,user.userInfo.username)
-      console.log('adding ',user.userInfo.username,' to room : ',roomName);
+      // const roomName=roomNameGenerator(instance.instanceInfo.username,user.userInfo.username)
+      const roomName=user.userInfo.username;
 
-      user.room=roomName;
-      instance.rooms.push(roomName)
+      if(activeRooms.has(roomName)){
+        const existingConnectedInstanceSID=activeRooms.get(roomName)?.instanceSID;
+        const existingInstanceSocket = activeInstances.get(existingConnectedInstanceSID)?.socket
+        //sending notificaiton to existing instances socket to temrinate that container/terminal
+        existingInstanceSocket.leave(roomName)
+        console.log('removed old instance socket from room : ',roomName);
+      }
+
+      console.log('adding ',user.userInfo.username,' to room : ',roomName);
 
       user.socket.join(roomName)
       instance.socket.join(roomName)
@@ -193,12 +190,13 @@ io.on('connection', (socket) => {
         clientSID:socket.id,
         instanceSID:instanceSID
       })
+
       console.log('added client : ',user.userInfo.username,' to room : ',roomName);
       console.log('added backend : ',instance.instanceInfo.username,' to room : ',roomName);      
 
       const userInstances=userDB.instances;
 
-      if(userInstances.includes(instanceId)){
+      if(userInstances.includes(new mongoose.Types.ObjectId(instanceId))){
         console.log('User already has one container in this instance');
         socket.to(user.userInfo.username).emit("resume-container",{
           username:user.userInfo.username,
@@ -208,13 +206,110 @@ io.on('connection', (socket) => {
         return
       }
 
+      userDB.instances.push(new mongoose.Types.ObjectId(instanceId));
+
+      await userDB.save()
+
       socket.to(roomName).emit("start-container",{
         username:user.userInfo.username,
         roomName
       })
     })
 
-    socket.on("resume-container",(data)=>{})
+    socket.on("resume-container",async(data:{instanceId:string})=>{
+      const instanceId=data.instanceId;
+      if(!instanceId){
+        socket.emit("client-notification",'instanceId not mentioned in the request')
+        return;
+      }
+
+      const instanceSID=instanceIdToSocketId.get(instanceId)
+
+      if(!instanceSID || !activeInstances.has(instanceSID)){
+        socket.emit("client-notification",'Requested instance is not currently active')
+        return;
+      }
+
+      const user=activeUsers.get(socket.id);
+
+      const userDB=await getUserWithId(user.userInfo._id)
+
+      if(!userDB){
+        socket.emit("client-notification",'User no longer exist in the DB')
+        return;
+      }
+
+      const roomName=user.userInfo.username;
+      if(activeRooms.has(roomName)){
+        const existingConnectedInstanceSID=activeRooms.get(roomName).instanceSID
+        const existingInstanceSocket=activeInstances.get(existingConnectedInstanceSID)?.socket;
+        existingInstanceSocket.leave(roomName)
+        console.log('Removed existing instance from room : ',roomName);
+      }
+
+      const instance=activeInstances.get(instanceSID)?.socket
+      socket.join(roomName)
+      instance.join(roomName)
+
+      activeRooms.set(roomName,{
+        clientSID:socket.id,
+        instanceSID:instanceSID
+      })
+
+      const userInstances=userDB.instances;
+
+      if(!userInstances.includes(new mongoose.Types.ObjectId(instanceId))){
+        userDB.instances.push(new mongoose.Types.ObjectId(instanceId))
+        await userDB.save()
+        //start-container
+        socket.to(roomName).emit('start-container',{
+          username:user.userInfo.username,
+          roomName
+        })
+        return;
+      }
+
+      socket.to(roomName).emit('resume-container',{
+        username:user.userInfo.username,
+        roomName
+      })
+    })
+
+    //exec-cmd
+    /**
+     * 1.get command from user
+     * 2.check if instance is online and find out roomName form userInfo
+     * 3.send that command to socket.to(roomName).emit("exec-cmd")
+     */
+
+    socket.on("exec-cmd",(data:{command:string})=>{
+      const {command} = data;
+      if(!command){
+        socket.emit("client-notification",'field command is not provided to execute the command')
+        return;
+      }
+
+      const user=activeUsers.get(socket.id)
+      const roomName=user?.userInfo?.username;
+
+      const room=activeRooms.get(roomName)
+
+      if(!room){
+        socket.emit('client-notification','You are not coonected with any instance so you cannot execute any command')
+        return;
+      }
+      
+      const instanceSID=room.instanceSID;
+      if(!activeInstances.has(instanceSID)){
+        socket.emit('client-notification','Instance is not active at the moment')
+        return;
+      }
+
+      socket.to(roomName).emit('exec-cmd',{
+        username:user.userInfo.username,
+        command
+      })
+    })
 
   } else if(role=='backend'){
 
@@ -258,19 +353,36 @@ io.on('connection', (socket) => {
 
 });
 
-function printActiveUsers(){
-  console.log('-----------ACTIVE-USERS------------------');
-  console.log(activeUsers);
-  console.log('-----------userIdToSocketId------------------');
-  console.log(userIdToSocketId);
-}
 
-function printActiveInstances(){
-  console.log('-----------ACTIVE-INSTANCES--------------');
-  console.log(activeInstances);
-  console.log('-----------instanceIdToSocketId------------------');
-  console.log(instanceIdToSocketId);
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// function printActiveUsers(){
+//   console.log('-----------ACTIVE-USERS------------------');
+//   console.log(activeUsers);
+//   console.log('-----------userIdToSocketId------------------');
+//   console.log(userIdToSocketId);
+// }
+
+// function printActiveInstances(){
+//   console.log('-----------ACTIVE-INSTANCES--------------');
+//   console.log(activeInstances);
+//   console.log('-----------instanceIdToSocketId------------------');
+//   console.log(instanceIdToSocketId);
+// }
 
 // setInterval(()=>{
 //   console.log('-----------ACTIVE-USERS------------------');
