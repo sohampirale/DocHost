@@ -18,7 +18,7 @@ userRouter.route("/signin")
         if (!existingUser) {
             throw new ApiError(404, "User not found");
         }
-        else if (!existingUser.comparePassword(password)) {
+        else if (!await existingUser.comparePassword(password)) {
             throw new ApiError(400, "Incorrect password");
         }
         const paylod = {

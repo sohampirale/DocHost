@@ -44,8 +44,8 @@ export async function userSignupController(req:Request, res:Response){
 
     return res
       .cookie("accessToken", accessToken, {
-        // httpOnly: true,       
-        // secure: true
+        httpOnly: true,       
+        secure: true,
         sameSite: "none"
       })
       .status(201)

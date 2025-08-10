@@ -23,6 +23,7 @@ import cookie from "cookie";
 import userRouter from "./routes/user.routes.js";
 import { verifyUserAccessToken } from "./lib/verifyToken.js";
 import ApiError from "./helpers/ApiError.js";
+import instanceRouter from "./routes/instance.routes.js";
 connectDB().then(() => {
     server.listen(3000, () => {
         console.log('✅ Server listening on http://localhost:3000');
@@ -33,27 +34,48 @@ connectDB().then(() => {
 });
 const allowedOrigin = "https://friendly-spork-wrvgj6vpp69rcgr99-3000.app.github.dev";
 app.use(cors({
-    origin: allowedOrigin,
+    origin: process.env.FRONTEND_URL,
     credentials: true
 }));
 app.use(express.json());
 app.use("/user", userRouter);
+app.use('/instance', instanceRouter);
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, '../src/public', 'index.html'));
 });
-io.on('connection', (socket) => {
+io.use((socket, next) => {
+    console.log('inside socket/io middleware');
+    const role = socket.handshake.query.role;
     try {
-        const cookieHeader = socket.handshake.headers.cookie;
-        const cookies = cookie.parse(cookieHeader);
-        const accessToken = cookies.accessToken;
-        const payload = verifyUserAccessToken(accessToken);
-        console.log('payload : ', payload);
+        if (role == 'client') {
+            const cookieHeader = socket.handshake.headers.cookie;
+            if (!cookieHeader) {
+                console.log('Client needs to signin first');
+                return next(new Error("No auth token found"));
+            }
+            const cookies = cookie.parse(cookieHeader);
+            const accessToken = cookies.accessToken;
+            console.log('accessToken : ', accessToken);
+            //verify userAccessToken
+            console.log('client connected');
+        }
+        else if (role == "backend") {
+            const DOCKHOST_API_KEY = socket.handshake.auth.DOCKHOST_API_KEY;
+            console.log('Backend connected API_KEY : ', DOCKHOST_API_KEY);
+            //verify instanceAccessToken
+        }
+        else if (!role) {
+            console.log('No role found');
+            next(new Error("Invalid query param"));
+        }
+        next();
     }
     catch (error) {
-        console.log('error validating the accessToken : ', error);
-        console.log('disconnecting the websocket');
-        socket.disconnect(true);
+        next(error);
     }
+});
+io.on('connection', (socket) => {
+    console.log('socket connected successfully!');
     socket.on('disconnect', () => {
         console.log('socket disconnected');
     });

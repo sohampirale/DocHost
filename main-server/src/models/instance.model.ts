@@ -1,4 +1,5 @@
 import mongoose,{Schema} from "mongoose"
+import bcrypt from "bcrypt"
 
 export const instanceSchema = new Schema({
   username:{
@@ -9,6 +10,9 @@ export const instanceSchema = new Schema({
   password:{
     type:String,
     required:true,
+  },
+  API_KEY:{
+    type:String
   },
   opearatingSystem:{
     type:String
@@ -23,6 +27,17 @@ export const instanceSchema = new Schema({
 },{
   timestamps:true,
 })
+
+instanceSchema.pre("save",async function(next){
+  if(this.isModified("password")){
+    this.password=await bcrypt.hash(this.password,5)
+  }
+  next()
+})
+
+instanceSchema.methods.comparePassword=async function(password:string){
+  return await bcrypt.compare(password,this.password)
+}
 
 const Instance = mongoose.model("Instance",instanceSchema);
 

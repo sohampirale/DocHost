@@ -1,3 +1,5 @@
+import dotenv from "dotenv"
+dotenv.config()
 import { io } from "socket.io-client"
 import pty from "node-pty"
 
@@ -17,9 +19,15 @@ function createFolderAtDirectory(directoryPath: string, folderName: string) {
 
 let terminal;
 
-
 // Connect to Main Server
-const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev?role=backend");
+const socket = io("https://congenial-dollop-wrvgj6vppj45cv45-3000.app.github.dev",{
+  query:{
+    role:"backend"
+  },
+  auth: {
+      DOCKHOST_API_KEY:process.env.DOCKHOST_API_KEY
+  },
+});
 
 socket.on("connect", () => {
   console.log("Connected to Main Server:", socket.id);

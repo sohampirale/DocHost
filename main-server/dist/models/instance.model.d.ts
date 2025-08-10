@@ -8,6 +8,7 @@ export declare const instanceSchema: mongoose.Schema<any, mongoose.Model<any, an
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 }, mongoose.Document<unknown, {}, mongoose.FlatRecord<{
@@ -17,6 +18,7 @@ export declare const instanceSchema: mongoose.Schema<any, mongoose.Model<any, an
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 }>, {}, mongoose.ResolveSchemaOptions<{
@@ -28,6 +30,7 @@ export declare const instanceSchema: mongoose.Schema<any, mongoose.Model<any, an
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 }> & {
@@ -42,6 +45,7 @@ declare const Instance: mongoose.Model<{
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 }, {}, {}, {}, mongoose.Document<unknown, {}, {
@@ -51,6 +55,7 @@ declare const Instance: mongoose.Model<{
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 }, {}, {
@@ -62,6 +67,7 @@ declare const Instance: mongoose.Model<{
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 } & {
@@ -77,6 +83,7 @@ declare const Instance: mongoose.Model<{
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 }, mongoose.Document<unknown, {}, mongoose.FlatRecord<{
@@ -86,6 +93,7 @@ declare const Instance: mongoose.Model<{
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 }>, {}, mongoose.ResolveSchemaOptions<{
@@ -97,6 +105,7 @@ declare const Instance: mongoose.Model<{
     username: string;
     password: string;
     maxContainers: number;
+    API_KEY?: string | null;
     opearatingSystem?: string | null;
     labName?: string | null;
 }> & {
