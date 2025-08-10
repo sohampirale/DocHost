@@ -6,6 +6,7 @@ import { Server } from "socket.io";
 import { fileURLToPath } from 'url';
 import path from 'path';
 import connectDB from "./lib/connectDB.js";
+import mongoose from "mongoose";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
@@ -24,6 +25,8 @@ import userRouter from "./routes/user.routes.js";
 import { verifyInstanceAccessToken, verifyUserAccessToken } from "./helpers/verifyToken.js";
 import ApiError from "./helpers/ApiError.js";
 import instanceRouter from "./routes/instance.routes.js";
+import { roomNameGenerator } from "./helpers/randomRoomNameGenerator.js";
+import { getAllInstancesOfUserWithId, getUserWithId } from "./services/user.services.js";
 connectDB().then(() => {
     server.listen(3000, () => {
         console.log('✅ Server listening on http://localhost:3000');
@@ -32,15 +35,17 @@ connectDB().then(() => {
     console.log('Failed to connectDB temrinating process gracefully');
     process.exit(1);
 });
-const allowedOrigin = "https://friendly-spork-wrvgj6vpp69rcgr99-3000.app.github.dev";
+const allowedOrigin = process.env.FRONTEND_URL;
 app.use(cors({
     origin: process.env.FRONTEND_URL,
     credentials: true
 }));
 const activeUsers = new Map();
 const activeInstances = new Map();
+const activeRooms = new Map();
 const userIdToSocketId = new Map();
 const instanceIdToSocketId = new Map();
+let allInstances = [];
 app.use(express.json());
 app.use("/user", userRouter);
 app.use('/instance', instanceRouter);
@@ -88,16 +93,13 @@ io.use((socket, next) => {
             const instanceInfo = verifyInstanceAccessToken(DOCKHOST_API_KEY);
             const _id = instanceInfo._id;
             console.log('_id of instance : ', _id);
-            if (instanceIdToSocketId.has(_id)) {
-                const sid = instanceIdToSocketId.get(_id);
-                if (activeInstances.has(sid)) {
-                    console.log('disconnecting one socket');
-                    activeInstances.get(sid).socket.disconnect();
-                    activeInstances.delete(sid);
-                }
-                console.log('removed _id form instanceIdToSocketId');
-                instanceIdToSocketId.delete(_id);
-            }
+            //:TODO disconnect another temirnlan if with same insatcneId if active
+            //:TODO push into the allInstances array only if does not exists there
+            allInstances.push({
+                _id,
+                username: instanceInfo.username
+            });
+            io.emit("all-instances", allInstances);
             activeInstances.set(socket.id, {
                 socket,
                 instanceInfo,
@@ -117,25 +119,168 @@ io.use((socket, next) => {
             return next(error);
         }
         next(new Error("Something went wrong"));
+        return;
     }
 });
 io.on('connection', (socket) => {
     console.log('socket connected successfully!');
     const role = socket.handshake.query.role;
     if (role == 'client') {
-        socket.on("start-container", (data) => {
-            const instanceId = data.insatnceId;
-            const sid = instanceIdToSocketId.get(instanceId);
-            if (!sid) {
+        socket.emit("all-instances", allInstances);
+        const _id = activeUsers.get(socket.id).userInfo._id;
+        getAllInstancesOfUserWithId(_id).then((allMyInstances) => {
+            socket.emit('all-my-instances', allMyInstances);
+        });
+        socket.on("start-container", async (data) => {
+            const instanceId = data.instanceId;
+            const instanceSID = instanceIdToSocketId.get(instanceId);
+            if (!instanceSID || !activeInstances.has(instanceSID)) {
                 console.log('Requested instance is not online at the moment');
                 return;
             }
+            const user = activeUsers.get(socket.id);
+            const userDB = await getUserWithId(user.userInfo._id);
+            if (!userDB) {
+                console.log('user does not exists in the DB');
+                return;
+            }
+            const instance = activeInstances.get(instanceSID);
+            // const roomName=roomNameGenerator(instance.instanceInfo.username,user.userInfo.username)
+            const roomName = user.userInfo.username;
+            if (activeRooms.has(roomName)) {
+                const existingConnectedInstanceSID = activeRooms.get(roomName)?.instanceSID;
+                const existingInstanceSocket = activeInstances.get(existingConnectedInstanceSID)?.socket;
+                //sending notificaiton to existing instances socket to temrinate that container/terminal
+                existingInstanceSocket.leave(roomName);
+                console.log('removed old instance socket from room : ', roomName);
+            }
+            console.log('adding ', user.userInfo.username, ' to room : ', roomName);
+            user.socket.join(roomName);
+            instance.socket.join(roomName);
+            activeRooms.set(roomName, {
+                clientSID: socket.id,
+                instanceSID: instanceSID
+            });
+            console.log('added client : ', user.userInfo.username, ' to room : ', roomName);
+            console.log('added backend : ', instance.instanceInfo.username, ' to room : ', roomName);
+            const userInstances = userDB.instances;
+            if (userInstances.includes(new mongoose.Types.ObjectId(instanceId))) {
+                console.log('User already has one container in this instance');
+                socket.to(user.userInfo.username).emit("resume-container", {
+                    username: user.userInfo.username,
+                    roomName
+                });
+                //resume-instance request this is
+                return;
+            }
+            userDB.instances.push(new mongoose.Types.ObjectId(instanceId));
+            await userDB.save();
+            socket.to(roomName).emit("start-container", {
+                username: user.userInfo.username,
+                roomName
+            });
+        });
+        socket.on("resume-container", async (data) => {
+            console.log('inside resume-container');
+            const instanceId = data.instanceId;
+            if (!instanceId) {
+                socket.emit("client-notification", 'instanceId not mentioned in the request');
+                return;
+            }
+            const instanceSID = instanceIdToSocketId.get(instanceId);
+            if (!instanceSID || !activeInstances.has(instanceSID)) {
+                socket.emit("client-notification", 'Requested instance is not currently active');
+                return;
+            }
+            const user = activeUsers.get(socket.id);
+            const userDB = await getUserWithId(user.userInfo._id);
+            if (!userDB) {
+                socket.emit("client-notification", 'User no longer exist in the DB');
+                return;
+            }
+            const roomName = user.userInfo.username;
+            if (activeRooms.has(roomName)) {
+                const existingConnectedInstanceSID = activeRooms.get(roomName).instanceSID;
+                const existingInstanceSocket = activeInstances.get(existingConnectedInstanceSID)?.socket;
+                existingInstanceSocket.leave(roomName);
+                console.log('Removed existing instance from room : ', roomName);
+            }
+            const instance = activeInstances.get(instanceSID)?.socket;
+            console.log('adding ', user.userInfo.username, ' to room : ', roomName);
+            socket.join(roomName);
+            instance.join(roomName);
+            activeRooms.set(roomName, {
+                clientSID: socket.id,
+                instanceSID: instanceSID
+            });
+            const userInstances = userDB.instances;
+            if (!userInstances.includes(new mongoose.Types.ObjectId(instanceId))) {
+                userDB.instances.push(new mongoose.Types.ObjectId(instanceId));
+                await userDB.save();
+                //start-container
+                socket.to(roomName).emit('start-container', {
+                    username: user.userInfo.username,
+                    roomName
+                });
+                return;
+            }
+            socket.to(roomName).emit('resume-container', {
+                username: user.userInfo.username,
+                roomName
+            });
+        });
+        //exec-cmd
+        /**
+         * 1.get command from user
+         * 2.check if instance is online and find out roomName form userInfo
+         * 3.send that command to socket.to(roomName).emit("exec-cmd")
+         */
+        socket.on("exec-cmd", (data) => {
+            console.log('inside exec-cmd');
+            const { command } = data;
+            if (!command) {
+                socket.emit("client-notification", 'field command is not provided to execute the command');
+                return;
+            }
+            const user = activeUsers.get(socket.id);
+            const roomName = user?.userInfo?.username;
+            const room = activeRooms.get(roomName);
+            console.log('room : ', room);
+            if (!room) {
+                socket.emit('client-notification', 'You are not coonected with any instance so you cannot execute any command');
+                return;
+            }
+            const instanceSID = room.instanceSID;
+            if (!activeInstances.has(instanceSID)) {
+                socket.emit('client-notification', 'Instance is not active at the moment');
+                return;
+            }
+            console.log('emitting to roomName : ', roomName);
+            socket.to(roomName).emit('exec-cmd', {
+                username: user.userInfo.username,
+                command
+            });
+        });
+    }
+    else if (role == 'backend') {
+        // socket.removeAllListeners("client-notification");
+        socket.on("client-notification", (data) => {
+            console.log('inside client-notification main server');
+            const roomName = data.roomName;
+            socket.to(roomName).emit('client-notification', data.notification);
+        });
+        // socket.removeAllListeners("client-output");
+        socket.on("client-output", (data) => {
+            console.log('inside client-output main server');
+            const roomName = data.roomName;
+            socket.to(roomName).emit("client-output", data.output);
         });
     }
     socket.on('disconnect', () => {
         console.log('socket disconnected');
         const role = socket.handshake.query.role;
         if (role == 'client') {
+            console.log('client disconnected');
             if (activeUsers.has(socket.id)) {
                 const userInfo = activeUsers.get(socket.id).userInfo;
                 const _id = userInfo._id;
@@ -150,6 +295,11 @@ io.on('connection', (socket) => {
             if (activeInstances.has(socket.id)) {
                 const instanceInfo = activeInstances.get(socket.id).instanceInfo;
                 const _id = instanceInfo._id;
+                const index = allInstances.findIndex(obj => obj._id === _id);
+                if (index != -1) {
+                    allInstances.splice(index, 1);
+                    io.emit("all-instances", allInstances);
+                }
                 console.log(instanceInfo.username, ' removed from active instances');
                 if (instanceIdToSocketId.has(_id)) {
                     instanceIdToSocketId.delete(_id);

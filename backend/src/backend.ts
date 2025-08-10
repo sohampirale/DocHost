@@ -21,12 +21,13 @@ const usersMap: Map<string, any> = new Map();
 
 
 function start_container_cmd(username: string) {
-  return `docket run -it --name ${username} ubuntu`
+  return `docker run -it --name ${username} ubuntu`
 }
 
 function resume_container_cmd(username:string){
   return `docker start -ai ${username}`
 }
+console.log('trying to connect...');
 
 const socket = io(process.env.MAIN_SERVER_BACKEND_URL, {
   query: {
@@ -56,7 +57,7 @@ socket.on("connect", () => {
       name: "xterm-color",
       cols: 80,
       rows: 30,
-      cwd: "/workspaces/DocHost",
+      cwd: "/",
       env: process.env
     })
 
@@ -80,10 +81,12 @@ socket.on("connect", () => {
       })
     }
 
+    terminal.removeAllListeners("data");
     terminal.on("data", (output: string) => {
+      console.log('!!start terminal!!');
       console.log('output reveieved from new terminal  is : ', output);
       if(!usersMap.has(data.username)){
-        console.log('output receievd from terminla but user not found,returning...');
+        console.log('output receievd from terminal but user not found,returning...');
         return;
       }
 
@@ -110,11 +113,14 @@ socket.on("connect", () => {
       name: "xterm-color",
       cols: 80,
       rows: 30,
-      cwd: "/workspaces/DocHost",
+      cwd: "/",
       env: process.env
     })
 
+    console.log('terminal : ',terminal);
+    
     if(!terminal){
+     
       socket.emit("client-notification", {
         roomName: data.roomName,
         notification:'Failed to resume your container'
@@ -125,19 +131,24 @@ socket.on("connect", () => {
         roomName: data.roomName,
         notification:'Container resumed successfully'
       })
-
       if(usersMap.has(data.username)){
         usersMap.get(data.username).terminal.kill()
         usersMap.delete(data.username)
         console.log('deleted old terminal instance of the same user');
       }
+
       usersMap.set(data.username,{
         roomName:data.roomName,
         terminal
       })
+
     }
 
+    terminal.removeAllListeners("data");
+
     terminal.on("data", (output: string) => {
+      console.log('!!resume terminal!!');
+      
       console.log('output reveieved from reseumed terminal is : ', output);
 
       socket.emit("client-output",{
@@ -149,17 +160,24 @@ socket.on("connect", () => {
   })
 
   socket.on("exec-cmd",(data: { username: string, roomName: string ,command:string})=>{
-    const username=data.username
     const command=data.command
+    console.log('inside exec-cmd :',command);
+    
+    const username=data.username
     if(!username){
       console.log('username not provided,returning');
       return 
     } else if(!usersMap.has(username)){
       console.log('termianl not found for username : ',username,',returning...');
+      socket.emit("client-notification",{
+        notification:`terminal not found for username : ${username},returning...`
+      })
       return
     }
 
     const terminal=usersMap.get(username).terminal
+    console.log('terminal : ',terminal);
+    
     if(terminal){
       terminal.write(command+'\n')
     } else {
@@ -179,4 +197,8 @@ socket.on("connect", () => {
     }
     usersMap.clear()
   });
+});
+
+socket.on("connect_error", (err) => {
+  console.error("❌ Connection error:", err.message);
 });

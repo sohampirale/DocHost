@@ -31,7 +31,7 @@ import { verifyInstanceAccessToken, verifyUserAccessToken } from "./helpers/veri
 import ApiError from "./helpers/ApiError.js";
 import instanceRouter from "./routes/instance.routes.js";
 import { roomNameGenerator } from "./helpers/randomRoomNameGenerator.js";
-import { getUserWithId } from "./services/user.services.js";
+import { getAllInstancesOfUserWithId, getUserWithId } from "./services/user.services.js";
 
 connectDB().then(() => {
   server.listen(3000, () => {
@@ -42,7 +42,8 @@ connectDB().then(() => {
   process.exit(1)
 })
 
-const allowedOrigin = "https://friendly-spork-wrvgj6vpp69rcgr99-3000.app.github.dev";
+const allowedOrigin = process.env.FRONTEND_URL;
+
 app.use(cors({
   origin: process.env.FRONTEND_URL,
   credentials: true
@@ -52,9 +53,9 @@ const activeUsers: Map<string, any> = new Map();
 const activeInstances: Map<string, any> = new Map();
 const activeRooms: Map<string, any> = new Map();
 
-
 const userIdToSocketId:Map<string,string>=new Map();
 const instanceIdToSocketId:Map<string,string>=new Map();
+let allInstances:any=[];
 
 app.use(express.json());
 
@@ -103,24 +104,23 @@ io.use((socket, next) => {
       })
       userIdToSocketId.set(userInfo._id,socket.id)
       printActiveUsers()
+      
     } else if (role == "backend") {
       const DOCKHOST_API_KEY = socket.handshake.auth.DOCKHOST_API_KEY;
       console.log('Backend connected : API_KEY : ', DOCKHOST_API_KEY);
       const instanceInfo = verifyInstanceAccessToken(DOCKHOST_API_KEY)
       const _id=instanceInfo._id;
       console.log('_id of instance : ',_id);
-      
-      if(instanceIdToSocketId.has(_id)){
-        const sid=instanceIdToSocketId.get(_id);
-        if(activeInstances.has(sid)){
-          console.log('disconnecting one socket');
-          activeInstances.get(sid).socket.disconnect()
-          activeInstances.delete(sid)
-        }
-        console.log('removed _id form instanceIdToSocketId');
-        
-        instanceIdToSocketId.delete(_id)
-      }
+
+      //:TODO disconnect another temirnlan if with same insatcneId if active
+      //:TODO push into the allInstances array only if does not exists there
+
+      allInstances.push({
+        _id,
+        username:instanceInfo.username
+      })
+
+      io.emit("all-instances",allInstances)
 
       activeInstances.set(socket.id,{
         socket,
@@ -129,6 +129,7 @@ io.use((socket, next) => {
       })
 
       instanceIdToSocketId.set(instanceInfo._id,socket.id)
+
       printActiveInstances()
     } else if (!role) {
       console.log('No role found');
@@ -140,6 +141,7 @@ io.use((socket, next) => {
       return next(error)
     }
     next(new Error("Something went wrong"))
+    return;
   }
 });
 
@@ -148,6 +150,13 @@ io.on('connection', (socket) => {
 
   const role=socket.handshake.query.role;
   if(role=='client'){
+    socket.emit("all-instances",allInstances)
+
+    const _id=activeUsers.get(socket.id).userInfo._id;
+
+    getAllInstancesOfUserWithId(_id).then((allMyInstances)=>{
+      socket.emit('all-my-instances',allMyInstances)
+    });
 
     socket.on("start-container",async(data:{instanceId:string})=>{
       
@@ -217,6 +226,8 @@ io.on('connection', (socket) => {
     })
 
     socket.on("resume-container",async(data:{instanceId:string})=>{
+      console.log('inside resume-container');
+      
       const instanceId=data.instanceId;
       if(!instanceId){
         socket.emit("client-notification",'instanceId not mentioned in the request')
@@ -248,6 +259,8 @@ io.on('connection', (socket) => {
       }
 
       const instance=activeInstances.get(instanceSID)?.socket
+
+      console.log('adding ',user.userInfo.username,' to room : ',roomName);
       socket.join(roomName)
       instance.join(roomName)
 
@@ -283,6 +296,8 @@ io.on('connection', (socket) => {
      */
 
     socket.on("exec-cmd",(data:{command:string})=>{
+      console.log('inside exec-cmd');
+      
       const {command} = data;
       if(!command){
         socket.emit("client-notification",'field command is not provided to execute the command')
@@ -293,7 +308,8 @@ io.on('connection', (socket) => {
       const roomName=user?.userInfo?.username;
 
       const room=activeRooms.get(roomName)
-
+      console.log('room : ',room);
+      
       if(!room){
         socket.emit('client-notification','You are not coonected with any instance so you cannot execute any command')
         return;
@@ -305,6 +321,8 @@ io.on('connection', (socket) => {
         return;
       }
 
+      console.log('emitting to roomName : ',roomName);
+      
       socket.to(roomName).emit('exec-cmd',{
         username:user.userInfo.username,
         command
@@ -313,12 +331,17 @@ io.on('connection', (socket) => {
 
   } else if(role=='backend'){
 
+    // socket.removeAllListeners("client-notification");
     socket.on("client-notification",(data:{roomName:string,notification:string})=>{
+      console.log('inside client-notification main server')
       const roomName=data.roomName
       socket.to(roomName).emit('client-notification',data.notification)
     })
 
+    // socket.removeAllListeners("client-output");
     socket.on("client-output",(data:{roomName:string,output:string})=>{
+      console.log('inside client-output main server');
+      
       const roomName=data.roomName;
       socket.to(roomName).emit("client-output",data.output)
     })
@@ -329,6 +352,7 @@ io.on('connection', (socket) => {
     console.log('socket disconnected');
     const role=socket.handshake.query.role;
     if(role=='client'){
+      console.log('client disconnected')
       if(activeUsers.has(socket.id)){
         const userInfo=activeUsers.get(socket.id).userInfo
         const _id=userInfo._id
@@ -342,6 +366,11 @@ io.on('connection', (socket) => {
       if(activeInstances.has(socket.id)){
         const instanceInfo=activeInstances.get(socket.id).instanceInfo
         const _id=instanceInfo._id;
+        const index=allInstances.findIndex(obj=>obj._id===_id)
+        if(index!=-1){
+          allInstances.splice(index,1)
+          io.emit("all-instances",allInstances)
+        }
         console.log(instanceInfo.username,' removed from active instances');
         if(instanceIdToSocketId.has(_id)){
           instanceIdToSocketId.delete(_id)
@@ -370,19 +399,19 @@ io.on('connection', (socket) => {
 
 
 
-// function printActiveUsers(){
-//   console.log('-----------ACTIVE-USERS------------------');
-//   console.log(activeUsers);
-//   console.log('-----------userIdToSocketId------------------');
-//   console.log(userIdToSocketId);
-// }
+function printActiveUsers(){
+  console.log('-----------ACTIVE-USERS------------------');
+  console.log(activeUsers);
+  console.log('-----------userIdToSocketId------------------');
+  console.log(userIdToSocketId);
+}
 
-// function printActiveInstances(){
-//   console.log('-----------ACTIVE-INSTANCES--------------');
-//   console.log(activeInstances);
-//   console.log('-----------instanceIdToSocketId------------------');
-//   console.log(instanceIdToSocketId);
-// }
+function printActiveInstances(){
+  console.log('-----------ACTIVE-INSTANCES--------------');
+  console.log(activeInstances);
+  console.log('-----------instanceIdToSocketId------------------');
+  console.log(instanceIdToSocketId);
+}
 
 // setInterval(()=>{
 //   console.log('-----------ACTIVE-USERS------------------');

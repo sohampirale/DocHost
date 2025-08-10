@@ -1,0 +1,1 @@
+{"version":3,"file":"randomRoomNameGenerator.js","sourceRoot":"","sources":["../../src/helpers/randomRoomNameGenerator.ts"],"names":[],"mappings":"AAAA,MAAM,UAAU,iBAAiB,CAAC,gBAAuB,EAAC,cAAqB;IAC7E,IAAI,QAAQ,GAAC,OAAO,CAAC;IACrB,QAAQ,IAAE,gBAAgB,IAAE,IAAI,CAAC,MAAM,EAAE,CAAA;IACzC,QAAQ,IAAE,GAAG,GAAC,CAAC,cAAc,IAAE,IAAI,CAAC,MAAM,EAAE,CAAC,CAAA;IAC7C,OAAO,QAAQ,CAAA;AACjB,CAAC"}
