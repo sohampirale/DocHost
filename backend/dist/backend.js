@@ -33,6 +33,13 @@ socket.on("connect", () => {
     console.log("Connected to Main Server:", socket.id);
     const shell = "bash";
     socket.on('start-container', (data) => {
+        if (usersMap.has(data.username)) {
+            const existing = usersMap.get(data.username);
+            existing.terminal.removeAllListeners("data");
+            existing.terminal.kill();
+            usersMap.delete(data.username);
+            console.log('Cleaned up existing terminal for:', data.username);
+        }
         if (!data.username) {
             console.log('username not found no starting container retunring...');
             return;
@@ -82,6 +89,13 @@ socket.on("connect", () => {
         });
     });
     socket.on('resume-container', (data) => {
+        if (usersMap.has(data.username)) {
+            const existing = usersMap.get(data.username);
+            existing.terminal.removeAllListeners("data");
+            existing.terminal.kill();
+            usersMap.delete(data.username);
+            console.log('Cleaned up existing terminal for:', data.username);
+        }
         if (!data.username) {
             console.log('username not receievd to start container,returning...');
             return;
@@ -139,7 +153,8 @@ socket.on("connect", () => {
         else if (!usersMap.has(username)) {
             console.log('termianl not found for username : ', username, ',returning...');
             socket.emit("client-notification", {
-                notification: `terminal not found for username : ${username},returning...`
+                notification: `terminal not found for username : ${username},returning...`,
+                roomName: data.roomName
             });
             return;
         }
@@ -150,13 +165,17 @@ socket.on("connect", () => {
         }
         else {
             console.log('terminal not found for username : ', username);
-            socket.emit("client-notification", "Terminal not found");
+            socket.emit("client-notification", {
+                notification: "Terminal not found",
+                roomName: data.roomName
+            });
         }
     });
     socket.on("disconnect", () => {
         console.log('disconnected from main-server via WS');
         for (const [username, value] of usersMap) {
             if (value.terminal) {
+                value.terminal.removeAllListeners("data");
                 value.terminal.kill();
                 console.log('killed terminal of ', username);
             }

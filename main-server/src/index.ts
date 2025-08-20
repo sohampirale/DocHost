@@ -331,14 +331,14 @@ io.on('connection', (socket) => {
 
   } else if(role=='backend'){
 
-    // socket.removeAllListeners("client-notification");
+    socket.removeAllListeners("client-notification");
     socket.on("client-notification",(data:{roomName:string,notification:string})=>{
       console.log('inside client-notification main server')
       const roomName=data.roomName
       socket.to(roomName).emit('client-notification',data.notification)
     })
 
-    // socket.removeAllListeners("client-output");
+    socket.removeAllListeners("client-output");
     socket.on("client-output",(data:{roomName:string,output:string})=>{
       console.log('inside client-output main server');
       
