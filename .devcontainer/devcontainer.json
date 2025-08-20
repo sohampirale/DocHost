@@ -1,0 +1,33 @@
+{
+  "name": "My Codespace with Docker",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu", 
+
+  // Add VS Code extensions if needed
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-azuretools.vscode-docker"]
+    }
+  },
+
+  // Forwarded ports if services expose something
+  "forwardPorts": [5432],
+
+  // Extra containers (services) running alongside
+  "services": {
+    "db": {
+      "image": "postgres:16",
+      "restart": "always",
+      "environment": {
+        "POSTGRES_USER": "user",
+        "POSTGRES_PASSWORD": "password",
+        "POSTGRES_DB": "mydb"
+      },
+      "ports": ["5432:5432"]
+    },
+    "ubuntu-test": {
+      "image": "ubuntu:22.04",
+      "command": "sleep infinity" 
+    }
+  }
+}
+
